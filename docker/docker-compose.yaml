@@ -1,0 +1,59 @@
+version: "3.9"
+
+name: queue-consumer 
+services:
+
+  # activemq:
+  #   image: rmohr/activemq
+  #   container_name: activemq
+  #   ports:
+  #     - "61613:61613"
+  #     - "8161:8161"
+
+  redis:
+    image: redis:7
+    container_name: redis
+    ports:
+      - "6379:6379"
+
+  consumer:
+    build:
+      context: ..
+      dockerfile: docker/consumer.Dockerfile
+    environment:
+      ACTIVEMQ_HOST: ${ACTIVEMQ_HOST}
+      ACTIVEMQ_PORT: ${ACTIVEMQ_PORT}
+      ACTIVEMQ_USER: ${ACTIVEMQ_USER}
+      ACTIVEMQ_PASSWORD: ${ACTIVEMQ_PASSWORD}
+      ACTIVEMQ_QUEUE: ${ACTIVEMQ_QUEUE}
+      ACTIVEMQ_PREFETCH: ${ACTIVEMQ_PREFETCH}
+      ACTIVEMQ_HEARTBEAT_OUT: ${ACTIVEMQ_HEARTBEAT_OUT}
+      ACTIVEMQ_HEARTBEAT_IN: ${ACTIVEMQ_HEARTBEAT_IN}
+
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND}
+
+      WORKER_TIMEOUT: ${WORKER_TIMEOUT}
+    depends_on:
+      # - activemq
+      - redis
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/worker.Dockerfile
+    environment:
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND}
+    depends_on:
+      - redis
+    restart: unless-stopped
+    deploy:
+      replicas: 2

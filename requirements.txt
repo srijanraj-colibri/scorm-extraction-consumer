@@ -1,0 +1,5 @@
+stomp.py
+pydantic
+pydantic-settings
+celery
+redis
