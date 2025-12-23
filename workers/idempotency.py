@@ -1,6 +1,6 @@
 import redis
 
-from settings import settings
+from core.settings import settings
 
 r = redis.Redis(
     host=settings.REDIS_HOST,

@@ -23,7 +23,14 @@ class Settings(BaseSettings):
 
     # ---------- Worker ----------
     WORKER_TIMEOUT: int = 600
-
+    
+    # ---------- Alfresco --------
+    ALFRESCO_BASE_URL: str 
+    ALFRESCO_USERNAME: str
+    ALFRESCO_PASSWORD: str
+    
+    LOG_LEVEL: str
+    
     class Config:
         extra = "ignore"
 

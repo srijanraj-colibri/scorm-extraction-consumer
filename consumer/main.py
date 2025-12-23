@@ -3,13 +3,12 @@ import signal
 import stomp
 import logging
 
-from settings import settings
-from consumer.stomp_listener import UploadEventListener
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from core.settings import settings
+from core.logging_config import setup_logging
+from consumer.listener import UploadEventListener   
 
 shutdown = False
+logger = logging.getLogger(__name__)
 
 
 def stop(*_):
@@ -18,38 +17,50 @@ def stop(*_):
     logger.info("Shutdown signal received")
 
 
-signal.signal(signal.SIGTERM, stop)
-signal.signal(signal.SIGINT, stop)
+def main():
+    setup_logging(settings.LOG_LEVEL)
 
-conn = stomp.Connection12(
-    [(settings.ACTIVEMQ_HOST, settings.ACTIVEMQ_PORT)],
-    heartbeats=(
-        settings.ACTIVEMQ_HEARTBEAT_OUT,
-        settings.ACTIVEMQ_HEARTBEAT_IN,
-    ),
-)
+    logger.info("Starting upload event consumer")
 
-conn.set_listener("", UploadEventListener(conn))
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
 
-conn.connect(
-    settings.ACTIVEMQ_USER,
-    settings.ACTIVEMQ_PASSWORD,
-    wait=True,
-)
+    conn = stomp.Connection12(
+        [(settings.ACTIVEMQ_HOST, settings.ACTIVEMQ_PORT)],
+        heartbeats=(
+            settings.ACTIVEMQ_HEARTBEAT_OUT,
+            settings.ACTIVEMQ_HEARTBEAT_IN,
+        ),
+    )
 
-conn.subscribe(
-    destination=settings.ACTIVEMQ_QUEUE,
-    id="upload-consumer",
-    ack="client-individual",
-    headers={
-        "activemq.prefetchSize": str(settings.ACTIVEMQ_PREFETCH)
-    },
-)
+    conn.set_listener(
+        "upload-consumer",
+        UploadEventListener(conn),
+    )
 
-logger.info("Upload consumer started and listening...")
+    conn.connect(
+        settings.ACTIVEMQ_USER,
+        settings.ACTIVEMQ_PASSWORD,
+        wait=True,
+    )
 
-while not shutdown:
-    time.sleep(1)
+    conn.subscribe(
+        destination=settings.ACTIVEMQ_QUEUE,
+        id="upload-consumer",
+        ack="client-individual",
+        headers={
+            "activemq.prefetchSize": str(settings.ACTIVEMQ_PREFETCH)
+        },
+    )
 
-logger.info("Disconnecting from ActiveMQ")
-conn.disconnect()
+    logger.info("Upload consumer started")
+
+    while not shutdown:
+        time.sleep(1)
+
+    logger.info("Disconnecting from ActiveMQ")
+    conn.disconnect()
+
+
+if __name__ == "__main__":
+    main()

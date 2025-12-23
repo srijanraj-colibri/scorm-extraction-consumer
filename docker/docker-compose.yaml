@@ -37,6 +37,14 @@ services:
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND}
 
       WORKER_TIMEOUT: ${WORKER_TIMEOUT}
+
+      
+      ALFRESCO_BASE_URL: ${ALFRESCO_BASE_URL}
+      ALFRESCO_USERNAME: ${ALFRESCO_USERNAME}
+      ALFRESCO_PASSWORD: ${ALFRESCO_PASSWORD}
+
+      LOG_LEVEL: ${LOG_LEVEL}
+
     depends_on:
       # - activemq
       - redis
@@ -52,8 +60,15 @@ services:
 
       CELERY_BROKER_URL: ${CELERY_BROKER_URL}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND}
+      
+      ALFRESCO_BASE_URL: ${ALFRESCO_BASE_URL}
+      ALFRESCO_USERNAME: ${ALFRESCO_USERNAME}
+      ALFRESCO_PASSWORD: ${ALFRESCO_PASSWORD}
+      
+      LOG_LEVEL: ${LOG_LEVEL}
+
     depends_on:
       - redis
     restart: unless-stopped
     deploy:
-      replicas: 2
+      replicas: 1

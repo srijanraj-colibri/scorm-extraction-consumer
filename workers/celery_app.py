@@ -1,6 +1,6 @@
 from celery import Celery
 
-from settings import settings
+from core.settings import settings
 
 celery_app = Celery(
     "alfresco_ai",

@@ -3,3 +3,4 @@ pydantic
 pydantic-settings
 celery
 redis
+requests

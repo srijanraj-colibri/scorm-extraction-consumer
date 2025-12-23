@@ -1,11 +1,12 @@
 import json
 import logging
 import stomp
-from consumer.schema import AlfrescoEvent
-from settings import settings
+
+from core.schema import RepoEvent
+from core.settings import settings
 from workers.tasks import auto_tag_node
 
-logger = logging.getLogger("consumer")
+logger = logging.getLogger(__name__)
 
 
 class UploadEventListener(stomp.ConnectionListener):
@@ -19,9 +20,11 @@ class UploadEventListener(stomp.ConnectionListener):
 
         try:
             payload = json.loads(frame.body)
-            event = AlfrescoEvent(**payload)
 
-            if event.eventType != "CONTENT_READY":
+            # ✅ Canonical schema validation
+            event = RepoEvent.model_validate(payload)
+
+            if event.eventType != "BINARY_CHANGED":
                 self._ack(ack_id, sub_id)
                 return
 
@@ -31,7 +34,7 @@ class UploadEventListener(stomp.ConnectionListener):
 
             if result is True:
                 self._ack(ack_id, sub_id)
-                logger.info(f"ACKed {ack_id}")
+                logger.info("ACKed %s", ack_id)
             else:
                 raise RuntimeError("Worker failed")
 
@@ -41,5 +44,5 @@ class UploadEventListener(stomp.ConnectionListener):
     def _ack(self, ack_id, sub_id):
         self.conn.send_frame(
             "ACK",
-            headers={"id": ack_id, "subscription": sub_id}
+            headers={"id": ack_id, "subscription": sub_id},
         )
