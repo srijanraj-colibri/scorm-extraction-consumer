@@ -1,111 +1,99 @@
-import logging
-from pydantic import ValidationError
-
-from workers.celery_app import celery_app
-from workers.idempotency import already_processed, mark_processed
+import os
+import tempfile
+import requests
+from celery import shared_task
 
 from core.schema import RepoEvent
+from core.settings import settings
 
-from services.rule_discovery_service import find_nearest_rule_csv
-from services.rule_loader_service import load_rules
-from services.rule_matcher import match_rule
-from services.tag_service import apply_tags
+from services.alfresco_client import AlfrescoClient
+from services.scorm_zip_detector import ScormZipDetector
+from services.scorm_extractor import ScormExtractor
+from services.scorm_uploader import ScormUploader
+from services.exceptions import ScormValidationError
 
-logger = logging.getLogger(__name__)
+
+def _extract_node_id(node_ref: str) -> str:
+    """
+    workspace://SpacesStore/<uuid> → <uuid>
+    """
+    if not node_ref or "/" not in node_ref:
+        raise ValueError(f"Invalid nodeRef: {node_ref}")
+    return node_ref.split("/")[-1]
 
 
-@celery_app.task(
+@shared_task(
     bind=True,
-    autoretry_for=(Exception,),
-    retry_backoff=10,
-    retry_kwargs={"max_retries": 3},
+    autoretry_for=(requests.HTTPError, RuntimeError),
+    retry_kwargs={"max_retries": 5, "countdown": 15},
 )
-def auto_tag_node(self, payload: dict) -> bool:
+def process_scorm_zip(self, payload: dict) -> bool:
     """
-    Rule-based auto-tagging worker task.
-    Schema-validated using core.schema.RepoEvent
+    End-to-end SCORM ZIP processing based on RepoEvent payload.
+
+    Flow:
+    - Validate payload schema
+    - Download ZIP from Alfresco
+    - Validate SCORM (imsmanifest.xml sanity)
+    - Create folder (same parent, ZIP name)
+    - Extract safely
+    - Upload extracted content
     """
 
-    try:
-        # ✅ Canonical schema validation
-        event = RepoEvent.model_validate(payload)
+    event = RepoEvent.model_validate(payload)
 
-    except ValidationError as e:
-        # ❌ Invalid payload → drop safely
-        logger.error(
-            "Invalid RepoEvent schema received in worker",
-            extra={"payload": payload},
-            exc_info=e,
-        )
-        return True  # ACK upstream (do not retry)
-
-    # 🔑 Correct idempotency key
-    key = f"{event.nodeRef}:{event.modifiedAt}"
-
-    if already_processed(key):
-        logger.info("Skipping duplicate event", extra={"key": key})
+    if event.eventType != "BINARY_CHANGED":
         return True
 
-    if not event.path:
-        logger.info(
-            "Event has no path, skipping",
-            extra={"nodeRef": event.nodeRef},
-        )
-        mark_processed(key)
+    if not event.name or not event.name.lower().endswith(".zip"):
         return True
 
-    logger.info(
-        "Starting auto-tag task",
-        extra={
-            "nodeRef": event.nodeRef,
-            "path": event.path,
-            "eventType": event.eventType,
-        },
+    if event.mimeType and event.mimeType != "application/zip":
+        return True
+
+    if not event.nodeRef or not event.parentNodeRef:
+        raise RuntimeError("Missing nodeRef or parentNodeRef")
+
+    zip_node_id = _extract_node_id(event.nodeRef)
+    parent_node_id = _extract_node_id(event.parentNodeRef)
+
+    zip_name = event.name
+    target_folder_name = os.path.splitext(zip_name)[0]
+
+    client = AlfrescoClient(
+        settings.ALFRESCO_BASE_URL,
+        settings.ALFRESCO_USERNAME,
+        settings.ALFRESCO_PASSWORD,
     )
 
-    # 1️⃣ Discover nearest rule CSV in Alfresco
-    logger.info("finding nearest rule csv file")
-    csv_node_id = find_nearest_rule_csv(event.path)
-    
-    if not csv_node_id:
-        logger.info("No rule CSV found", extra={"path": event.path})
-        mark_processed(key)
-        return True
-    
-    logger.info("found rule csv", extra={"nodeID": csv_node_id})
+    detector = ScormZipDetector()
+    extractor = ScormExtractor()
+    uploader = ScormUploader(client)
 
-    # 2️⃣ Load rules from CSV
-    rules = load_rules(csv_node_id)
+    with tempfile.TemporaryDirectory() as tmp:
+        zip_path = os.path.join(tmp, zip_name)
+        extract_dir = os.path.join(tmp, "extracted")
 
-    if not rules:
-        logger.info(
-            "Rule CSV empty or invalid",
-            extra={"csvNodeId": csv_node_id},
+        try:
+            client.download_content(zip_node_id, zip_path)
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                raise RuntimeError(
+                    f"Binary not yet available for node {zip_node_id}"
+                )
+            raise
+
+        result = detector.detect(zip_path)
+        if not result.is_scorm or not result.is_valid:
+            raise ScormValidationError(result.errors)
+
+        target_folder_id = client.create_folder(
+            name=target_folder_name,
+            parent_id=parent_node_id,
         )
-        mark_processed(key)
-        return True
-    print("check rules", rules)
-    # 3️⃣ Match rules against file path
-    tags = match_rule(event.path, rules)
-    
-    print("check tags", tags)
 
-    if not tags:
-        logger.info("No matching rules", extra={"path": event.path})
-        mark_processed(key)
-        return True
+        extractor.extract(zip_path, extract_dir)
 
-    # 4️⃣ Apply tags via Alfresco API
-    apply_tags(event.nodeRef, tags)
+        uploader.upload_directory(extract_dir, target_folder_id)
 
-    logger.info(
-        "Auto-tagging completed",
-        extra={
-            "nodeRef": event.nodeRef,
-            "tags": tags,
-        },
-    )
-
-    # 5️⃣ Mark processed
-    mark_processed(key)
     return True

@@ -21,7 +21,7 @@ import stomp
 
 from core.schema import RepoEvent
 from core.settings import settings
-from workers.tasks import auto_tag_node
+from workers.tasks import process_scorm_zip
 
 logger = logging.getLogger(__name__)
 
@@ -62,14 +62,13 @@ class QueueEventListener(stomp.ConnectionListener):
         try:
             payload = json.loads(frame.body)
 
-            # ✅ Canonical schema validation
             event = RepoEvent.model_validate(payload)
 
             if event.eventType != "BINARY_CHANGED":
                 self._ack(ack_id, sub_id)
                 return
 
-            result = auto_tag_node.apply_async(
+            result = process_scorm_zip.apply_async(
                 args=[payload]
             ).get(timeout=settings.WORKER_TIMEOUT)
 
