@@ -4,6 +4,8 @@ __pycache__/
 *.pyo
 *.pyd
 *.log
+venv/
+env/
 
 # Env files
 .env
@@ -18,3 +20,9 @@ Thumbs.db
 
 # Docker
 *.pid
+
+# Virtual environments
+venv/
+env/
+.venv/
+.virtualenv/
