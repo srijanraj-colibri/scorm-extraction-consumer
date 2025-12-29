@@ -128,7 +128,7 @@ Alfresco Community already running (or ActiveMQ reachable)
 
 From the project root directory:
 
-docker compose --env-file .env -f docker/docker-compose.yml up --build
+docker compose --env-file .env -f docker/docker-compose.yaml up --build
 
 
 This will start:
